@@ -8,10 +8,10 @@ if not component.isAvailable("internet") then
 end
 
 local files = {
-    {"https://github.com/", "/lib/doubleBuffering.lua"},
-    {"https://github.com/", "/lib/GUI.lua"},
-    {"https://github.com/", "/lib/image.lua"},
-    {"https://github.com/", "/lib/color.lua"}
+    {"https://github.com/BrightYC/GUI/blob/main/doubleBuffering.lua", "/lib/doubleBuffering.lua"},
+    {"https://github.com/BrightYC/GUI/blob/main/GUI.lua", "/lib/GUI.lua"},
+    {"https://github.com/BrightYC/GUI/blob/main/image.lua", "/lib/image.lua"},
+    {"https://github.com/BrightYC/GUI/blob/main/color.lua", "/lib/color.lua"}
 }
 
 local wgetPattern = "wget %s %s %s"
