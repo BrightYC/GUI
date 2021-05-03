@@ -2,6 +2,7 @@ local unicode = require("unicode")
 local computer = require("computer")
 local color = require("color")
 local filesystem = require("filesystem")
+local bit32 = require("bit32")
 
 --------------------------------------------------------------------------------
 
@@ -13,110 +14,16 @@ local encodingMethodsSave = {}
 
 --------------------------------------------------------------------------------
 
-local BUFFER_SIZE = 1024
-
-local function readString(self, count)
-	-- If current buffer content is a "part" of "count of data" we need to read
-	if count > #self.buffer then
-		local data, chunk = self.buffer
-
-		while #data < count do
-			chunk = self.proxy.read(self.stream, BUFFER_SIZE)
-
-			if chunk then
-				data = data .. chunk
-			else
-				self.position = self:seek("end", 0)
-
-				-- EOF at start
-				if data == "" then
-					return nil
-				-- EOF after read
-				else
-					return data
-				end
-			end
-		end
-
-		self.buffer = data:sub(count + 1, -1)
-		chunk = data:sub(1, count)
-		self.position = self.position + #chunk
-
-		return chunk
-	else
-		local data = self.buffer:sub(1, count)
-		self.buffer = self.buffer:sub(count + 1, -1)
-		self.position = self.position + count
-
-		return data
-	end
-end
-
-local function readLine(self)
-	local data = ""
-	while true do
-		if #self.buffer > 0 then
-			local starting, ending = self.buffer:find("\n")
-			if starting then
-				local chunk = self.buffer:sub(1, starting - 1)
-				self.buffer = self.buffer:sub(ending + 1, -1)
-				self.position = self.position + #chunk
-
-				return data .. chunk
-			else
-				data = data .. self.buffer
-			end
-		end
-
-		local chunk = self.proxy.read(self.stream, BUFFER_SIZE)
-		if chunk then
-			self.buffer = chunk
-			self.position = self.position + #chunk
-		-- EOF
-		else
-			local data = self.buffer
-			self.position = self:seek("end", 0)
-
-			return #data > 0 and data or nil
-		end
-	end
-end
-
-local function lines(self)
-	return function()
-		local line = readLine(self)
-		if line then
-			return line
-		else
-			self:close()
-		end
-	end
-end
-
-local function readAll(self)
-	local data, chunk = ""
-	while true do
-		chunk = self.proxy.read(self.stream, 4096)
-		if chunk then
-			data = data .. chunk
-		-- EOF
-		else
-			self.position = self:seek("end", 0)
-			return data
-		end
-	end
-end
-
-local function readBytes(self, count, littleEndian)
+local function readBytes(file, count, littleEndian)
 	if count == 1 then
-		local data = readString(self, 1)
+		local data = file:read(1)
 		if data then
 			return string.byte(data)
 		end
 
 		return nil
 	else
-		local bytes, result = {string.byte(readString(self, count) or "\x00", 1, 8)}, 0
+		local bytes, result = {string.byte(file:read(count) or "\x00", 1, 8)}, 0
 
 		if littleEndian then
 			for i = #bytes, 1, -1 do
@@ -132,8 +39,8 @@ local function readBytes(self, count, littleEndian)
 	end
 end
 
-local function readUnicodeChar(self)
-	local byteArray = {string.byte(readString(self, 1))}
+local function readUnicodeChar(file)
+	local byteArray = {string.byte(file:read(1))}
 
 	local nullBitPosition = 0
 	for i = 1, 7 do
@@ -144,154 +51,22 @@ local function readUnicodeChar(self)
 	end
 
 	for i = 1, nullBitPosition - 2 do
-		table.insert(byteArray, string.byte(readString(self, 1)))
 	end
 
 	return string.char(table.unpack(byteArray))
 end
 
-local function read(self, format, ...)
-	local formatType = type(format)
-	if formatType == "number" then	
-		return readString(self, format)
-	elseif formatType == "string" then
-		format = format:gsub("^%*", "")
-
-		if format == "a" then
-			return readAll(self)
-		elseif format == "l" then
-			return readLine(self)
-		elseif format == "b" then
-			return readBytes(self, 1)
-		elseif format == "bs" then
-			return readBytes(self, ...)
-		elseif format == "u" then
-			return readUnicodeChar(self)
-		else
-			error("bad argument #2 ('a' (whole file), 'l' (line), 'u' (unicode char), 'b' (byte as number) or 'bs' (sequence of n bytes as number) expected, got " .. format .. ")")
-		end
-	else
-		error("bad argument #1 (number or string expected, got " .. formatType ..")")
-	end
-end
-
-local function seek(self, pizda, cyka)
-	if pizda == "set" then
-		local result, reason = self.proxy.seek(self.stream, "set", cyka)
-		if result then
-			self.position = result
-			self.buffer = ""
-		end
-
-		return result, reason
-	elseif pizda == "cur" then
-		local result, reason = self.proxy.seek(self.stream, "set", self.position + cyka)
-		if result then
-			self.position = result
-			self.buffer = ""
-		end
-
-		return result, reason
-	elseif pizda == "end" then
-		local result, reason = self.proxy.seek(self.stream, "end", cyka)
-		if result then
-			self.position = result
-			self.buffer = ""
-		end
-
-		return result, reason
-	else
-		error("bad argument #2 ('set', 'cur' or 'end' expected, got " .. tostring(pizda) .. ")")
-	end
-end
-
-local function write(self, ...)
+local function write(file, ...)
 	local data = {...}
 	for i = 1, #data do
 		data[i] = tostring(data[i])
 	end
 	data = table.concat(data)
-
-	-- Data is small enough to fit buffer
-	if #data < (BUFFER_SIZE - #self.buffer) then
-		self.buffer = self.buffer .. data
-
-		return true
-	else
-		-- Write current buffer content
-		local success, reason = self.proxy.write(self.stream, self.buffer)
-		if success then
-			-- If data will not fit buffer, use iterative writing with data partitioning 
-			if #data > BUFFER_SIZE then
-				for i = 1, #data, BUFFER_SIZE do
-					success, reason = self.proxy.write(self.stream, data:sub(i, i + BUFFER_SIZE - 1))
-					
-					if not success then
-						break
-					end
-				end
-
-				self.buffer = ""
-
-				return success, reason
-			-- Data will perfectly fit in empty buffer
-			else
-				self.buffer = data
-
-				return true
-			end
-		else
-			return false, reason
-		end
-	end
+	write(file, data)
 end
 
-local function writeBytes(self, ...)
-	return write(self, string.char(...))
-end
-
-local function close(self)
-	if self.write and #self.buffer > 0 then
-		self.proxy.write(self.stream, self.buffer)
-	end
-
-	return self.proxy.close(self.stream)
-end
-
-local function open(path, mode)
-	local proxy, proxyPath = filesystem.get(path)
-	local result, reason = proxy.open(proxyPath, mode)
-	if result then
-		local handle = {
-			proxy = proxy,
-			stream = result,
-			position = 0,
-			buffer = "",
-			close = close,
-			seek = seek,
-		}
-
-		if mode == "r" or mode == "rb" then
-			handle.readString = readString
-			handle.readUnicodeChar = readUnicodeChar
-			handle.readBytes = readBytes
-			handle.readLine = readLine
-			handle.lines = lines
-			handle.readAll = readAll
-			handle.read = read
-
-			return handle
-		elseif mode == "w" or mode == "wb" or mode == "a" or mode == "ab" then
-			handle.write = write
-			handle.writeBytes = writeBytes
-
-			return handle
-		else
-			error("bad argument #2 ('r', 'rb', 'w', 'wb' or 'a' expected, got )" .. tostring(mode) .. ")")
-		end
-	else
-		return nil, reason
-	end
+local function writeBytes(file, ...)
+	return write(file, string.char(...))
 end
 
 --------------------------------------------------------------------------------
@@ -329,64 +104,64 @@ local function group(picture, compressColors)
 end
 
 encodingMethodsSave[5] = function(file, picture)
-	file:writeBytes(
+	writeBytes(file, 
 		bit32.rshift(picture[1], 8),
 		bit32.band(picture[1], 0xFF)
 	)
 
-	file:writeBytes(
+	writeBytes(file, 
 		bit32.rshift(picture[2], 8),
 		bit32.band(picture[2], 0xFF)
 	)
 
 	for i = 3, #picture, 4 do
-		file:writeBytes(
+		writeBytes(file, 
 			color.to8Bit(picture[i]),
 			color.to8Bit(picture[i + 1]),
 			math.floor(picture[i + 2] * 255)
 		)
 
-		file:write(picture[i + 3])
+		write(file, picture[i + 3])
 	end
 end
 
 encodingMethodsLoad[5] = function(file, picture)
-	picture[1] = file:readBytes(2)
-	picture[2] = file:readBytes(2)
+	picture[1] = readBytes(file, 2)
+	picture[2] = readBytes(file, 2)
 
 	for i = 1, image.getWidth(picture) * image.getHeight(picture) do
-		table.insert(picture, color.to24Bit(file:readBytes(1)))
-		table.insert(picture, color.to24Bit(file:readBytes(1)))
-		table.insert(picture, file:readBytes(1) / 255)
+		table.insert(picture, color.to24Bit(readBytes(file, 1)))
+		table.insert(picture, color.to24Bit(readBytes(file, 1)))
+		table.insert(picture, readBytes(file, 1) / 255)
 		table.insert(picture, readUnicodeChar(file))
 	end
 end
 
 local function loadOCIF67(file, picture, mode)
-	picture[1] = file:readBytes(1)
-	picture[2] = file:readBytes(1)
+	picture[1] = readBytes(file, 1)
+	picture[2] = readBytes(file, 1)
 
 	local currentAlpha, currentSymbol, currentBackground, currentForeground, currentY
 
-	for alpha = 1, file:readBytes(1) + mode do
-		currentAlpha = file:readBytes(1) / 255
+	for alpha = 1, readBytes(file, 1) + mode do
+		currentAlpha = readBytes(file, 1) / 255
 		
-		for symbol = 1, file:readBytes(2) + mode do
-			currentSymbol = file:readUnicodeChar()
+		for symbol = 1, readBytes(file, 2) + mode do
+			currentSymbol = readUnicodeChar(file)
 			
-			for background = 1, file:readBytes(1) + mode do
-				currentBackground = color.to24Bit(file:readBytes(1))
+			for background = 1, readBytes(file, 1) + mode do
+				currentBackground = color.to24Bit(readBytes(file, 1))
 				
-				for foreground = 1, file:readBytes(1) + mode do
-					currentForeground = color.to24Bit(file:readBytes(1))
+				for foreground = 1, readBytes(file, 1) + mode do
+					currentForeground = color.to24Bit(readBytes(file, 1))
 					
-					for y = 1, file:readBytes(1) + mode do
-						currentY = file:readBytes(1)
+					for y = 1, readBytes(file, 1) + mode do
+						currentY = readBytes(file, 1)
 						
-						for x = 1, file:readBytes(1) + mode do
+						for x = 1, readBytes(file, 1) + mode do
 							image.set(
 								picture,
-								file:readBytes(1),
+								readBytes(file, 1),
 								currentY,
 								currentBackground,
 								currentForeground,
@@ -416,20 +191,20 @@ local function saveOCIF67(file, picture, mode)
 	local groupedPicture = group(picture, true)
 
 	-- Writing 1 byte per image width and height
-	file:writeBytes(
+	writeBytes(file, 
 		picture[1],
 		picture[2]
 	)
 
 	-- Writing 1 byte for alphas array size
-	file:writeBytes(getGroupSize(groupedPicture))
+	writeBytes(file, getGroupSize(groupedPicture))
 
 	local symbolsSize
 
 	for alpha in pairs(groupedPicture) do
 		symbolsSize = getGroupSize(groupedPicture[alpha])
 
-		file:writeBytes(
+		writeBytes(file, 
 			-- Writing 1 byte for current alpha value
 			math.floor(alpha * 255),
 			-- Writing 2 bytes for symbols array size
@@ -439,12 +214,12 @@ local function saveOCIF67(file, picture, mode)
 
 		for symbol in pairs(groupedPicture[alpha]) do
 			-- Writing current unicode symbol value
-			file:write(symbol)
+			write(file, symbol)
 			-- Writing 1 byte for backgrounds array size
-			file:writeBytes(getGroupSize(groupedPicture[alpha][symbol]))
+			writeBytes(file, getGroupSize(groupedPicture[alpha][symbol]))
 
 			for background in pairs(groupedPicture[alpha][symbol]) do
-				file:writeBytes(
+				writeBytes(file, 
 					-- Writing 1 byte for background color value (compressed by color)
 					background,
 					-- Writing 1 byte for foregrounds array size
@@ -452,7 +227,7 @@ local function saveOCIF67(file, picture, mode)
 				)
 
 				for foreground in pairs(groupedPicture[alpha][symbol][background]) do
-					file:writeBytes(
+					writeBytes(file, 
 						-- Writing 1 byte for foreground color value (compressed by color)
 						foreground,
 						-- Writing 1 byte for y array size
@@ -460,7 +235,7 @@ local function saveOCIF67(file, picture, mode)
 					)
 					
 					for y in pairs(groupedPicture[alpha][symbol][background][foreground]) do
-						file:writeBytes(
+						writeBytes(file, 
 							-- Writing 1 byte for current y value
 							y,
 							-- Writing 1 byte for x array size
@@ -468,7 +243,7 @@ local function saveOCIF67(file, picture, mode)
 						)
 
 						for x = 1, #groupedPicture[alpha][symbol][background][foreground][y] do
-							file:writeBytes(groupedPicture[alpha][symbol][background][foreground][y][x])
+							writeBytes(file, groupedPicture[alpha][symbol][background][foreground][y][x])
 						end
 					end
 				end
@@ -525,10 +300,10 @@ end
 function image.save(path, picture, encodingMethod)
 	encodingMethod = encodingMethod or 6
 	
-	local file, reason = open(path, "wb")
+	local file, reason = io.open(path, "wb")
 	if file then	
 		if encodingMethodsSave[encodingMethod] then
-			file:write(OCIFSignature, string.char(encodingMethod))
+			write(file, OCIFSignature, string.char(encodingMethod))
 
 			local result, reason = xpcall(encodingMethodsSave[encodingMethod], debug.traceback, file, picture)
 			
@@ -549,11 +324,11 @@ function image.save(path, picture, encodingMethod)
 end
 
 function image.load(path)
-	local file, reason = open(path, "rb")
+	local file, reason = io.open(path, "rb")
 	if file then
-		local readedSignature = file:readString(#OCIFSignature)
+		local readedSignature = file:read(#OCIFSignature)
 		if readedSignature == OCIFSignature then
-			local encodingMethod = file:readBytes(1)
+			local encodingMethod = readBytes(file, 1)
 			if encodingMethodsLoad[encodingMethod] then
 				local picture = {}
 				local result, reason = xpcall(encodingMethodsLoad[encodingMethod], debug.traceback, file, picture)
