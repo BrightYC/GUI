@@ -51,7 +51,6 @@ local function readUnicodeChar(file)
 	end
 
 	for i = 1, nullBitPosition - 2 do
-		table.insert(byteArray, string.byte(file:read(1)))
 	end
 
 	return string.char(table.unpack(byteArray))
