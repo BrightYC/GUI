@@ -3,10 +3,10 @@ if not require("component").isAvailable("internet") then
 end
 
 local files = {
-    {"https://raw.githubusercontent.com/BrightYC/GUI/main/doubleBuffering.lua", "/lib/doubleBuffering.lua"},
-    {"https://raw.githubusercontent.com/BrightYC/GUI/main/GUI.lua", "/lib/GUI.lua"},
-    {"https://raw.githubusercontent.com/BrightYC/GUI/main/image.lua", "/lib/image.lua"},
-    {"https://raw.githubusercontent.com/BrightYC/GUI/main/color.lua", "/lib/color.lua"}
+    {"https://raw.githubusercontent.com/BrightYC/GUI/main/buffer.lua", "/usr/lib/UI/buffer.lua"},
+    {"https://raw.githubusercontent.com/BrightYC/GUI/main/GUI.lua", "/usr/lib/UI/GUI.lua"},
+    {"https://raw.githubusercontent.com/BrightYC/GUI/main/image.lua", "/usr/lib/UI/image.lua"},
+    {"https://raw.githubusercontent.com/BrightYC/GUI/main/color.lua", "/usr/lib/UI/color.lua"}
 }
 
 for i = 1, #files do

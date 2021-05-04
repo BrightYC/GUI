@@ -1,7 +1,7 @@
+local color = require("UI.color")
+
 local unicode = require("unicode")
 local computer = require("computer")
-local color = require("color")
-local filesystem = require("filesystem")
 local bit32 = require("bit32")
 
 --------------------------------------------------------------------------------

@@ -1,4 +1,5 @@
-local color = require("color")
+local color = require("UI.color")
+
 local unicode = require("unicode")
 local component = require("component")
 

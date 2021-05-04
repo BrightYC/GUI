@@ -1,3 +1,7 @@
+local color = require("UI.color")	
+local image = require("UI.image")	
+local buffer = require("UI.buffer")
+
 local component = require("component")	
 local computer = require("computer")	
 local unicode = require("unicode")
@@ -5,10 +9,6 @@ local unicode = require("unicode")
 local keyboard = require("keyboard")
 local serialization = require("serialization")
 local filesystem = require("filesystem")	
-
-local color = require("color")	
-local image = require("image")	
-local buffer = require("doubleBuffering")
 
 -----------------------------------------------------------------------------------------
 
