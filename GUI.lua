@@ -1,6 +1,6 @@
-local color = require("UI.color")	
-local image = require("UI.image")	
-local buffer = require("UI.buffer")
+local color = require("color")	
+local image = require("image")	
+local buffer = require("doubleBuffering")
 
 local component = require("component")	
 local computer = require("computer")	
